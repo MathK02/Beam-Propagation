@@ -1,0 +1,126 @@
+% Paramètres de la simulation
+Lambda = (400:600:800) * 1e-9;
+f = 0.5;
+r = 0.01;
+N = 512;
+coeffZern = [0.5 1];  % Coefficients réduits
+n = [4 2];
+m = [0 0];
+Zmax = 0.05;
+NZ = 101;
+
+% Discretisation
+S = 1.1 * r;
+ds = 2 * S / N;
+x = (-N/2:1:N/2-1) * ds;
+y = x;
+[X, Y] = meshgrid(x, y);
+
+% Création de la pupille sans correction
+PDisq = double(sqrt(X.^2 + Y.^2) < r);
+TFPDisq = fft2(ifftshift(PDisq));
+PSF_before = fftshift(TFPDisq);
+
+% Visualisation sans correction
+figure;
+subplot(1, 2, 1);
+VisuIdBPh(x, y, PSF_before, -40);
+title("PSF without correction");
+xlabel("x (m)");
+ylabel("y (m)");
+
+% Création de la pupille avec correction Zernike
+PZern = ones(N, N);
+for j = 1:length(coeffZern)
+    PZern = PZern .* exp(1i * coeffZern(j) * ZnmXY(X, Y, n(j), m(j)));
+end
+TFPZern = fft2(ifftshift(PDisq .* exp(1i * PZern)));
+PSF_after = fftshift(TFPZern);
+
+% Visualisation avec correction Zernike
+subplot(1, 2, 2);
+VisuIdBPh(x, y, PSF_after, -40);
+title("PSF with Zernike correction");
+xlabel("x (m)");
+ylabel("y (m)");
+
+% Création des vecteurs de propagation
+dz = Zmax / NZ;
+Zplus = (0:NZ) * dz;
+Zmoins = -fliplr(Zplus(2:end));
+Z = [Zmoins, Zplus];
+
+% Initialisation des matrices pour stocker les résultats
+Ichrom_with = zeros(N, length(Z));
+Ichrom_without = zeros(N, length(Z));
+
+% Boucle sur les longueurs d'onde
+for lambda = Lambda
+    % Propagation avec correction Zernike
+    U = PSF_after;
+    Ufinal = zeros(N, length(Z));
+    Ufinal(:, NZ+1) = U(:, N/2);  % Point focal au milieu
+    
+    % Propagation vers l'avant
+    for l = NZ+2:length(Z)
+        TFU = fft2(ifftshift(U));
+        H = exp(-1i * 2 * pi / lambda * dz) .* exp(1i * pi * lambda * dz * ((X / (lambda * f)).^2 + (Y / (lambda * f)).^2));
+        U = fftshift(ifft2(ifftshift(fftshift(TFU) .* H)));
+        Ufinal(:, l) = U(:, N/2);
+    end
+    
+    % Propagation vers l'arrière
+    U = PSF_after;
+    for l = NZ:-1:1
+        TFU = fft2(ifftshift(U));
+        H = exp(1i * 2 * pi / lambda * dz) .* exp(-1i * pi * lambda * dz * ((X / (lambda * f)).^2 + (Y / (lambda * f)).^2));
+        U = fftshift(ifft2(ifftshift(fftshift(TFU) .* H)));
+        Ufinal(:, l) = U(:, N/2);
+    end
+    
+    Ichrom_with = Ichrom_with + abs(Ufinal).^2;
+    
+    % Propagation sans correction Zernike
+    U = PSF_before;
+    Ufinal = zeros(N, length(Z));
+    Ufinal(:, NZ+1) = U(:, N/2);
+    
+    % Propagation vers l'avant
+    for l = NZ+2:length(Z)
+        TFU = fft2(ifftshift(U));
+        H = exp(-1i * 2 * pi / lambda * dz) .* exp(1i * pi * lambda * dz * ((X / (lambda * f)).^2 + (Y / (lambda * f)).^2));
+        U = fftshift(ifft2(ifftshift(fftshift(TFU) .* H)));
+        Ufinal(:, l) = U(:, N/2);
+    end
+    
+    % Propagation vers l'arrière
+    U = PSF_before;
+    for l = NZ:-1:1
+        TFU = fft2(ifftshift(U));
+        H = exp(1i * 2 * pi / lambda * dz) .* exp(-1i * pi * lambda * dz * ((X / (lambda * f)).^2 + (Y / (lambda * f)).^2));
+        U = fftshift(ifft2(ifftshift(fftshift(TFU) .* H)));
+        Ufinal(:, l) = U(:, N/2);
+    end
+    
+    Ichrom_without = Ichrom_without + abs(Ufinal).^2;
+end
+
+% Visualisation de la propagation
+figure;
+subplot(1, 2, 1);
+imagesc(Z, y, sqrt(Ichrom_without));
+colormap('hot');
+colorbar;
+title("Propagation without Zernike correction");
+xlabel("Propagation axis (m)");
+ylabel("x (m)");
+axis xy;
+
+subplot(1, 2, 2);
+imagesc(Z, y, sqrt(Ichrom_with));
+colormap('hot');
+colorbar;
+title("Propagation with Zernike correction");
+xlabel("Propagation axis (m)");
+ylabel("x (m)");
+axis xy;
